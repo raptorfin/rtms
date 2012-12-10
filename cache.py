@@ -46,6 +46,7 @@ class TradeCache(BaseCache):
     def __init__(self, cont, attr):
         self.stypes = self.load_status_types()
         self.ttypes = self.load_trade_types()
+        self.ot_map = self.load_ot_mapping()
         BaseCache.__init__(self, cont, attr)
 
     def load(self, cont, attr):
@@ -60,19 +61,36 @@ class TradeCache(BaseCache):
     
     def load_trade_types(self):
         return {t.type: t for t in model.TradeType.objects.all()}
-    
-    def get_trade(self, order, status):
-        name = order.instr_id.name
+
+    def load_ot_mapping(self):
+        return {m.order_type.id: model.TradeType.objects.get(id=m.trade_type.id) for m in model.OrderTradeMapping.objects.all()}
+
+    def define_trade_elems(self, order, status='Open'):
+        def format_date(date):
+            from datetime import datetime
+            d = datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
+            return d.strftime('%Y-%m-%d')
+        bits = {}
+        bits['instr_id'] = order.instr
+        bits['quantity'] = order.quantity
+        bits['date'] = format_date(order.date)
+        bits['trade_type'] = self.ot_map[order.order_type.id]
+        bits['status_type'] = self.stypes[status]
+        return bits
+
+    def get_trade(self, order):
+        name = order.instr.name
         if self.get(name):
             return self.get(name)
-        else:            
+        else:
+            tbits = self.define_trade_elems(order)
             return model.Trade(
                 name=name,
-                date=None,
-                instr_id=order.instr_id,
-                quantity=order.quantity,
-                trade_type=None,
-                status_type=self.stypes[status]
+                date=tbits['date'],
+                instr=tbits['instr_id'],
+                quantity=tbits['quantity'],
+                trade_type=tbits['trade_type'],
+                status_type=tbits['status_type']
             )
 
 
@@ -87,20 +105,20 @@ class OrderCache(BaseCache):
         return {t.type: t for t in model.OrderType.objects.all()}
 
     def get_orders_by_trade(self, t_id):
-        return model.Order.objects.filter(trade_id_id=t_id)
+        return model.Order.objects.filter(trade_id=t_id)
 
-    def aggregate_orders(self):
-        for order in self:
-            order.quantity = sum(order.qty_list)
-            order.comm = sum(order.comm_list)
-            #order.price = 
+    def calc_order_weights(self):
+        for oid in self:
+            self[oid].price = self[oid].calc_weighted_price()
+            self[oid].commission = sum(i['comm'] for i in self[oid].price_elems)
+            self[oid].quantity = sum(i['qty'] for i in self[oid].price_elems)
 
     def group_orders(self):
         grouped = defaultdict(lambda : defaultdict(list))
-        for obj in self:
-            i_key = self[obj].instr_id.name
-            t_key = self[obj].order_type.action
-            grouped[i_key][t_key].append(self[obj])
+        for oid in self:
+            i_key = self[oid].instr.name
+            t_key = self[oid].order_type.action
+            grouped[i_key][t_key].append(self[oid])
         return grouped
 
     def set_order_type(self, code, action):
@@ -120,9 +138,11 @@ class OrderCache(BaseCache):
             c_orders = orders[instr][self.SELL_ACTION]
 
             if len(c_orders) == 0:
-                trade = tcache.get_trade(o_orders[0], 'Open')
+                trade = tcache.get_trade(o_orders[0])
+                trade.save()
                 for order in o_orders:
-                    order.trade_id = trade
+                    order.trade = trade
+                    order.save()
 '''
             elif self.quantities_are_equal(o_orders, c_orders):
                 t_cache.process_close_trade(instr, c_orders[0], o_orders[0])

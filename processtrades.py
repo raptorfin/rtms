@@ -93,11 +93,11 @@ def create_order(vals, icache, ocache):
     else:
         order = model.Order(broker_order_id=oid)
         order.date = vals['dateTime'].replace(',','')
-        order.instr_id = icache[name]
-        order.price_elems.append(parts)
+        order.instr = icache[name]
+        order.price_elems = [parts]
         order.order_type = ocache.set_order_type(vals['code'], vals['buySell'])
         ocache[oid] = order
- 
+
 def main():
     parse_cmdline_args()
     init_logger()
@@ -109,8 +109,8 @@ def main():
         tcache = cache.TradeCache(model.Trade, 'name')
         populate_open_trades(tcache, ocache)
         create_trades(data, icache, ocache)
-        # aggregate_orders(ocache)
-        # ocache.process_orders(ocache.group_orders(), tcache)
+        ocache.calc_order_weights()
+        ocache.process_orders(ocache.group_orders(), tcache)
     else:
         logging.info("No new trades for today")
 

@@ -15,17 +15,25 @@ class TradeType(models.Model):
         return self.type
 
 
-class InstrumentType(models.Model):
+class OrderType(models.Model):
     type = models.CharField(max_length=100, unique=True)
-    multiplier = models.IntegerField()
+    action = models.CharField(max_length=100)
 
     def __unicode__(self):
         return self.type
 
 
-class OrderType(models.Model):
+class OrderTradeMapping(models.Model):
+    order_type = models.ForeignKey(OrderType)
+    trade_type = models.ForeignKey(TradeType)
+
+    def __unicode__(self):
+        return '<ordertype={0}, tradetype={1}>'
+
+
+class InstrumentType(models.Model):
     type = models.CharField(max_length=100, unique=True)
-    action = models.CharField(max_length=100)
+    multiplier = models.IntegerField()
 
     def __unicode__(self):
         return self.type
@@ -43,7 +51,7 @@ class Instrument(models.Model):
 class Trade(models.Model):
     date = models.DateField('trade date')
     name = models.CharField(max_length=100, unique_for_date=date)
-    instr_id = models.ForeignKey(Instrument)
+    instr = models.ForeignKey(Instrument)
     quantity = models.IntegerField()
     trade_type = models.ForeignKey(TradeType)
     status_type = models.ForeignKey(TradeStatus)
@@ -55,16 +63,28 @@ class Trade(models.Model):
 class Order(models.Model):
     date = models.DateTimeField('order date')
     broker_order_id = models.IntegerField(unique=True)
-    instr_id = models.ForeignKey(Instrument)
+    instr = models.ForeignKey(Instrument)
     quantity = models.IntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=6)
-    comm = models.DecimalField(max_digits=10, decimal_places=6)
+    commission = models.DecimalField(max_digits=10, decimal_places=6)
     order_type = models.ForeignKey(OrderType)
-    trade_id = models.ForeignKey(Trade)
+    trade = models.ForeignKey(Trade)
     price_elems = []
-    #price_list = []
-    #qty_list = []
-    #comm_list = []
+
+    def calc_weighted_price(self):
+        sum_price = sum(i['price'] * i['qty'] for i in self.price_elems)
+        sum_qty = sum(i['qty'] for i in self.price_elems)
+        return sum_price / sum_qty
 
     def __unicode__(self):
-        return '<brokerid={0}, instrid={1}, date={2}, type={3}>'.format(self.broker_order_id, self.instr_id, self.date, self.order_type)
+        return (
+            '<brokerid={0}, instrid={1}, date={2}, type={3}>, '
+            'price={4}, qty={5}, comm={6}, tradeid={7}>'.format(self.broker_order_id,
+                                                                self.instr_id,
+                                                                self.date,
+                                                                self.order_type,
+                                                                self.price,
+                                                                self.quantity,
+                                                                self.commission,
+                                                                self.trade_id)
+                )
